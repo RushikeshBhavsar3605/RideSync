@@ -5,6 +5,7 @@ import (
 	pb "ride-sharing/shared/proto/trip"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type tripServiceClient struct {
@@ -15,10 +16,10 @@ type tripServiceClient struct {
 func NewTripServiceClient() (*tripServiceClient, error) {
 	tripServiceURL := os.Getenv("TRIP_SERVICE_URL")
 	if tripServiceURL == "" {
-		tripServiceURL = "trip-service:9093"
+		tripServiceURL = "localhost:50051"
 	}
 
-	conn, err := grpc.NewClient(tripServiceURL)
+	conn, err := grpc.NewClient(tripServiceURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
