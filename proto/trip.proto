@@ -8,6 +8,9 @@ option go_package = "shared/proto/trip;trip";
 service TripService{
     // PreviewTrip returns route and pricing estimates for a potential trip.
     rpc PreviewTrip(PreviewTripRequest) returns (PreviewTripResponse);
+
+    // CreateTrip creates a new trip with confirmed details.
+    rpc CreateTrip(CreateTripRequest) returns (CreateTripResponse);
 }
 
 message PreviewTripRequest {
@@ -42,4 +45,13 @@ message RideFare {
     string user_id = 2;
     string package_slug = 3;
     double total_price_cents = 4;
+}
+
+message CreateTripRequest {
+    string ride_fare_id=1;
+    string user_id=2;
+}
+
+message CreateTripResponse{
+    string trip_id=1;
 }
