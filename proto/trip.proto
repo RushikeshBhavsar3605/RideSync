@@ -44,7 +44,7 @@ message RideFare {
     string id = 1;
     string user_id = 2;
     string package_slug = 3;
-    double total_price_cents = 4;
+    double total_price_in_cents = 4;
 }
 
 message CreateTripRequest {

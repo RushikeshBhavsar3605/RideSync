@@ -15,10 +15,10 @@ type RideFareModel struct {
 
 func (r *RideFareModel) ToProto() *pb.RideFare {
 	return &pb.RideFare{
-		Id:              r.ID.Hex(),
-		UserId:          r.UserID,
-		PackageSlug:     r.PackageSlug,
-		TotalPriceCents: r.TotalPriceInCents,
+		Id:                r.ID.Hex(),
+		UserId:            r.UserID,
+		PackageSlug:       r.PackageSlug,
+		TotalPriceInCents: r.TotalPriceInCents,
 	}
 }
 

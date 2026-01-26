@@ -41,9 +41,7 @@ func handleTripPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := contracts.APIResponse{Data: tripPreview}
-
-	writeJSON(w, http.StatusCreated, response)
+	writeProtoJSON(w, http.StatusCreated, tripPreview)
 }
 
 func handleTripStart(w http.ResponseWriter, r *http.Request) {
