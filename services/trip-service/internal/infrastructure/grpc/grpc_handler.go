@@ -28,7 +28,24 @@ func NewGRPCHandler(server *grpc.Server, service domain.TripService) *gRPCHandle
 }
 
 func (h *gRPCHandler) CreateTrip(ctx context.Context, req *pb.CreateTripRequest) (*pb.CreateTripResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateTrip not implemented")
+	fareID := req.GetRideFareId()
+	userID := req.GetUserId()
+
+	rideFare, err := h.service.GetAndValidateFare(ctx, fareID, userID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to validate the fare: %v", err)
+	}
+
+	trip, err := h.service.CreateTrip(ctx, rideFare)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create the trip: %v", err)
+	}
+
+	// TODO: publish an event on the Async Comms module.
+
+	return &pb.CreateTripResponse{
+		TripId: trip.ID.Hex(),
+	}, nil
 }
 
 func (h *gRPCHandler) PreviewTrip(ctx context.Context, req *pb.PreviewTripRequest) (*pb.PreviewTripResponse, error) {

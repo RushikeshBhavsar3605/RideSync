@@ -48,10 +48,27 @@ message RideFare {
 }
 
 message CreateTripRequest {
-    string ride_fare_id=1;
-    string user_id=2;
+    string ride_fare_id = 1;
+    string user_id = 2;
 }
 
 message CreateTripResponse{
-    string trip_id=1;
+    string trip_id = 1;
+    Trip trip = 2;
+}
+
+message Trip{
+    string id = 1;
+    RideFare selected_fare = 2;
+    Route route = 3;
+    string status = 4;
+    string user_id = 5;
+    TripDriver driver = 6;
+}
+
+message TripDriver{
+    string id = 1;
+    string name = 2;
+    string profile_picture = 3;
+    string car_plate = 4;
 }
