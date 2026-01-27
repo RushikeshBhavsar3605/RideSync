@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package driver;
+
+option go_package = "shared/proto/driver;driver";
+
+// Service responsible for driver lifecycle management.
+service DriverService{
+    // Registers a new driver in the system.
+    rpc RegisterDriver(RegisterDriverRequest) returns (RegisterDriverResponse);
+
+    // Unregisters an existing driver from the system.
+    rpc UnregisterDriver(RegisterDriverRequest) returns (RegisterDriverResponse);
+}
+
+message RegisterDriverRequest{
+    string driver_id = 1;
+    string package_slug = 2;
+}
+
+message RegisterDriverResponse{
+    Driver driver = 1;
+}
+
+message Driver{
+    string id = 1;
+    string name = 2;
+    string profile_picture = 3;
+    string car_plate = 4;
+    string geohash = 5;
+    string package_slug = 6;
+    Location location = 7;
+}
+
+message Location{
+    double latitude = 1;
+    double longitude = 2;
+}
