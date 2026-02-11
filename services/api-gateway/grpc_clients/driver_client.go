@@ -16,7 +16,7 @@ type driverServiceClient struct {
 func NewDriverServiceClient() (*driverServiceClient, error) {
 	driverServiceURL := os.Getenv("DRIVER_SERVICE_URL")
 	if driverServiceURL == "" {
-		driverServiceURL = "driver-service:9092"
+		driverServiceURL = "localhost:50052"
 	}
 
 	conn, err := grpc.NewClient(driverServiceURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
