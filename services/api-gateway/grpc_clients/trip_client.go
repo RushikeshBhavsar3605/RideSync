@@ -1,11 +1,15 @@
 package grpc_clients
 
 import (
+	"crypto/tls"
 	"os"
+	"strings"
+
 	pb "ride-sharing/shared/proto/trip"
 	"ride-sharing/shared/tracing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -20,9 +24,14 @@ func NewTripServiceClient() (*tripServiceClient, error) {
 		tripServiceURL = "localhost:50051"
 	}
 
+	creds := insecure.NewCredentials()
+	if strings.Contains(tripServiceURL, "onrender.com") {
+		creds = credentials.NewTLS(&tls.Config{})
+	}
+
 	dialOptions := append(
 		tracing.DialOptionsWithTracing(),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 
 	conn, err := grpc.NewClient(tripServiceURL, dialOptions...)

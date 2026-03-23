@@ -1,11 +1,15 @@
 package grpc_clients
 
 import (
+	"crypto/tls"
 	"os"
+	"strings"
+
 	pb "ride-sharing/shared/proto/driver"
 	"ride-sharing/shared/tracing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -20,9 +24,14 @@ func NewDriverServiceClient() (*driverServiceClient, error) {
 		driverServiceURL = "localhost:50052"
 	}
 
+	creds := insecure.NewCredentials()
+	if strings.Contains(driverServiceURL, "onrender.com") {
+		creds = credentials.NewTLS(&tls.Config{})
+	}
+
 	dialOptions := append(
 		tracing.DialOptionsWithTracing(),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 
 	conn, err := grpc.NewClient(driverServiceURL, dialOptions...)

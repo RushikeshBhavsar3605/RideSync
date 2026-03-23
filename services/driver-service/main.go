@@ -3,21 +3,21 @@ package main
 import (
 	"context"
 	"log"
-	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"ride-sharing/shared/env"
 	"ride-sharing/shared/messaging"
 	"ride-sharing/shared/tracing"
+	"strings"
 	"syscall"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	grpcserver "google.golang.org/grpc"
 )
 
-var GrpcAddr = ":50052"
-
 func main() {
-	// Initialize Tracing
 	tracerCfg := tracing.Config{
 		ServiceName:    "driver-service",
 		Environment:    env.GetString("ENVIRONMENT", "development"),
@@ -42,11 +42,6 @@ func main() {
 		cancel()
 	}()
 
-	lis, err := net.Listen("tcp", GrpcAddr)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
 	svc := NewService()
 
 	// RabbitMQ connection
@@ -69,16 +64,29 @@ func main() {
 		}
 	}()
 
-	log.Printf("Starting gRPC server Trip service on port %s", lis.Addr().String())
+	// Combined gRPC + HTTP on single port
+	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
 
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcServer.ServeHTTP(w, r)
+		} else {
+			httpMux.ServeHTTP(w, r)
+		}
+	})
+
+	addr := ":" + env.GetString("PORT", "50052")
+	log.Printf("Starting server (gRPC + HTTP) on %s", addr)
 	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Printf("failed to serve: %v", err)
+		if err := http.ListenAndServe(addr, h2c.NewHandler(combined, &http2.Server{})); err != nil {
+			log.Printf("server error: %v", err)
 			cancel()
 		}
 	}()
 
-	// wait for the shutdown signal
 	<-ctx.Done()
 	log.Println("Shutting down the server...")
 	grpcServer.GracefulStop()

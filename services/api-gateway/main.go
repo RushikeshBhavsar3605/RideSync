@@ -55,6 +55,11 @@ func main() {
 	mux.Handle("/ws/riders", tracing.WrapHandlerFunc(func(w http.ResponseWriter, r *http.Request) { handleRidersWebSocket(w, r, rabbitmq) }, "/ws/riders"))
 	mux.Handle("/webhook/stripe", tracing.WrapHandlerFunc(func(w http.ResponseWriter, r *http.Request) { handleStripeWebhook(w, r, rabbitmq) }, "/webhook/stripe"))
 
+	// Health endpoint
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+
 	server := &http.Server{
 		Addr:    httpAddr,
 		Handler: mux,

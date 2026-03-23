@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,6 +35,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer sh(ctx)
+
+	// ---- Minimal Health Endpoint (for Render ping) ----
+	go func() {
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("ok"))
+		})
+
+		log.Println("Health server running on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Printf("health server error: %v", err)
+			cancel()
+		}
+	}()
 
 	rabbitMqURI := env.GetString("RABBITMQ_URI", "amqp://guest:guest@localhost:5672/")
 
