@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"ride-sharing/services/trip-service/internal/infrastructure/events"
@@ -18,6 +18,8 @@ import (
 	"ride-sharing/shared/messaging"
 	"ride-sharing/shared/tracing"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	grpcserver "google.golang.org/grpc"
 )
 
@@ -26,7 +28,7 @@ func main() {
 	tracerCfg := tracing.Config{
 		ServiceName:    "trip-service",
 		Environment:    env.GetString("ENVIRONMENT", "development"),
-		JaegerEndpoint: env.GetString("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+		JaegerEndpoint: env.GetString("JAEGER_ENDPOINT", ""), // disable noisy error
 	}
 
 	sh, err := tracing.InitTracer(tracerCfg)
@@ -61,7 +63,6 @@ func main() {
 
 	publisher := events.NewTripEventPublisher(rabbitmq)
 
-	// Consumers
 	go events.NewDriverConsumer(rabbitmq, svc).Listen()
 	go events.NewPaymentConsumer(rabbitmq, svc).Listen()
 
@@ -74,31 +75,41 @@ func main() {
 	}()
 
 	// ---- gRPC server ----
-	port := env.GetString("PORT", "50051")
-
-	lis, err := net.Listen("tcp", ":"+port)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
 	grpcServer := grpcserver.NewServer(tracing.WithTracingInterceptors()...)
 	grpc.NewGRPCHandler(grpcServer, svc, publisher)
 
-	log.Printf("gRPC server running on :%s", port)
+	// ---- HTTP mux ----
+	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
 
-	// ---- Health server (separate HTTP) ----
-	go func() {
-		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("ok"))
-		})
-		log.Println("Health server running on :8080")
-		http.ListenAndServe(":8080", nil)
-	}()
+	// ---- Combined handler (CRITICAL) ----
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 &&
+			strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
+
+			log.Println("Incoming gRPC request")
+			grpcServer.ServeHTTP(w, r)
+			return
+		}
+
+		log.Println("Incoming HTTP request:", r.URL.Path)
+		httpMux.ServeHTTP(w, r)
+	})
 
 	// ---- Start server ----
+	port := env.GetString("PORT", "50051")
+	addr := "0.0.0.0:" + port
+
+	log.Printf("Server running on %s", addr)
+
 	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Printf("gRPC server error: %v", err)
+		if err := http.ListenAndServe(
+			addr,
+			h2c.NewHandler(handler, &http2.Server{}),
+		); err != nil {
+			log.Printf("server error: %v", err)
 			cancel()
 		}
 	}()
