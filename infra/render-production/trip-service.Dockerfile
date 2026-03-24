@@ -5,7 +5,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY services/trip-service ./services/trip-service
+COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -o trip-service \
