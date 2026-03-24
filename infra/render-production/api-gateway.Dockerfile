@@ -6,7 +6,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY services/api-gateway ./services/api-gateway
+COPY services/api-gateway ../../services/api-gateway
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -o api-gateway \
