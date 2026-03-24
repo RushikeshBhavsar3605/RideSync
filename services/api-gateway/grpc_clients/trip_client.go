@@ -19,22 +19,25 @@ type tripServiceClient struct {
 }
 
 func NewTripServiceClient() (*tripServiceClient, error) {
-	tripServiceURL := os.Getenv("TRIP_SERVICE_URL")
-	if tripServiceURL == "" {
-		tripServiceURL = "localhost:50051"
+	url := os.Getenv("TRIP_SERVICE_URL")
+	if url == "" {
+		url = "localhost:50051"
 	}
 
-	creds := insecure.NewCredentials()
-	if strings.Contains(tripServiceURL, "onrender.com") {
+	var creds = insecure.NewCredentials()
+
+	// Use TLS for Render
+	if strings.Contains(url, "onrender.com") {
 		creds = credentials.NewTLS(&tls.Config{})
 	}
 
-	dialOptions := append(
-		tracing.DialOptionsWithTracing(),
-		grpc.WithTransportCredentials(creds),
+	conn, err := grpc.Dial(
+		url,
+		append(
+			tracing.DialOptionsWithTracing(),
+			grpc.WithTransportCredentials(creds),
+		)...,
 	)
-
-	conn, err := grpc.NewClient(tripServiceURL, dialOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +52,6 @@ func NewTripServiceClient() (*tripServiceClient, error) {
 
 func (c *tripServiceClient) Close() {
 	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			return
-		}
+		c.conn.Close()
 	}
 }
