@@ -9,7 +9,7 @@ COPY services/driver-service ./services/driver-service
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -o driver-service \
-    ./services/driver-service/cmd
+    ./services/driver-service
 
 FROM alpine:3.19
 
