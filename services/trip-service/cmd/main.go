@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -13,7 +14,9 @@ import (
 	"ride-sharing/shared/db"
 	"ride-sharing/shared/env"
 	"ride-sharing/shared/messaging"
+	pb "ride-sharing/shared/proto/trip"
 	"ride-sharing/shared/tracing"
+	"ride-sharing/shared/types"
 	"strings"
 	"syscall"
 
@@ -21,6 +24,17 @@ import (
 	"golang.org/x/net/http2/h2c"
 	grpcserver "google.golang.org/grpc"
 )
+
+type previewTripRequest struct {
+	UserID      string           `json:"userID"`
+	Pickup      types.Coordinate `json:"pickup"`
+	Destination types.Coordinate `json:"destination"`
+}
+
+type createTripRequest struct {
+	RideFareID string `json:"rideFareID"`
+	UserID     string `json:"userID"`
+}
 
 func main() {
 	tracerCfg := tracing.Config{
@@ -80,12 +94,84 @@ func main() {
 
 	// Starting the gRPC server
 	grpcServer := grpcserver.NewServer(tracing.WithTracingInterceptors()...)
-	grpc.NewGRPCHandler(grpcServer, svc, publisher)
+	grpcHandler := grpc.NewGRPCHandler(grpcServer, svc, publisher)
 
 	// Combined gRPC + HTTP on single port
 	httpMux := http.NewServeMux()
+
 	httpMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
+	})
+
+	httpMux.HandleFunc("/trip/preview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req previewTripRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "failed to parse JSON data", http.StatusBadRequest)
+			return
+		}
+
+		// Convert to protobuf
+		pbReq := &pb.PreviewTripRequest{
+			UserId: req.UserID,
+			StartLocation: &pb.Coordinate{
+				Latitude:  req.Pickup.Latitude,
+				Longitude: req.Pickup.Longitude,
+			},
+			EndLocation: &pb.Coordinate{
+				Latitude:  req.Destination.Latitude,
+				Longitude: req.Destination.Longitude,
+			},
+		}
+
+		resp, err := grpcHandler.PreviewTrip(r.Context(), pbReq)
+		if err != nil {
+			log.Printf("failed to preview trip (HTTP): %v", err)
+			http.Error(w, "failed to preview trip", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Printf("failed to encode response: %v", err)
+		}
+	})
+
+	httpMux.HandleFunc("/trip/create", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req createTripRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "failed to parse JSON data", http.StatusBadRequest)
+			return
+		}
+
+		// Convert to protobuf
+		pbReq := &pb.CreateTripRequest{
+			RideFareId: req.RideFareID,
+			UserId:     req.UserID,
+		}
+
+		resp, err := grpcHandler.CreateTrip(r.Context(), pbReq)
+		if err != nil {
+			log.Printf("failed to create trip (HTTP): %v", err)
+			http.Error(w, "failed to create trip", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Printf("failed to encode response: %v", err)
+		}
 	})
 
 	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

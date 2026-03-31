@@ -46,7 +46,7 @@ func handleTripPreview(w http.ResponseWriter, r *http.Request) {
 	// Close the client to avoid resource leaks!
 	defer tripService.Close()
 
-	tripPreview, err := tripService.Client.PreviewTrip(ctx, reqBody.toProto())
+	tripPreview, err := tripService.PreviewTrip(ctx, reqBody)
 	if err != nil {
 		log.Printf("Failed to preview a trip: %v", err)
 		http.Error(w, "Failed to preview a trip", http.StatusInternalServerError)
@@ -79,7 +79,7 @@ func handleTripStart(w http.ResponseWriter, r *http.Request) {
 	// Close the client to avoid resource leaks!
 	defer tripService.Close()
 
-	trip, err := tripService.Client.CreateTrip(ctx, reqBody.toProto())
+	trip, err := tripService.CreateTrip(ctx, reqBody)
 	if err != nil {
 		log.Printf("Failed to start a trip: %v", err)
 		http.Error(w, "Failed to start trip", http.StatusInternalServerError)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -36,19 +37,6 @@ func main() {
 	defer cancel()
 	defer sh(ctx)
 
-	// ---- Minimal Health Endpoint (for Render ping) ----
-	go func() {
-		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("ok"))
-		})
-
-		log.Println("Health server running on :8080")
-		if err := http.ListenAndServe(":8080", nil); err != nil {
-			log.Printf("health server error: %v", err)
-			cancel()
-		}
-	}()
-
 	rabbitMqURI := env.GetString("RABBITMQ_URI", "amqp://guest:guest@localhost:5672/")
 
 	// Setup graceful shutdown
@@ -78,6 +66,45 @@ func main() {
 
 	// Service
 	svc := service.NewPaymentService(paymentProcessor)
+
+	// HTTP routes for payment service
+	go func() {
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("ok"))
+		})
+
+		http.HandleFunc("/payment/session", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+
+			var req types.PaymentIntent
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "failed to parse JSON data", http.StatusBadRequest)
+				return
+			}
+
+			intent, err := svc.CreatePaymentSession(r.Context(), req.TripID, req.UserID, req.DriverID, req.Amount, req.Currency)
+			if err != nil {
+				log.Printf("failed to create payment session: %v", err)
+				http.Error(w, "failed to create payment session", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			if err := json.NewEncoder(w).Encode(intent); err != nil {
+				log.Printf("failed to encode response: %v", err)
+			}
+		})
+
+		log.Println("Payment HTTP server running on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Printf("payment http server error: %v", err)
+			cancel()
+		}
+	}()
 
 	// RabbitMQ connection
 	rabbitmq, err := messaging.NewRabbitMQ(rabbitMqURI)

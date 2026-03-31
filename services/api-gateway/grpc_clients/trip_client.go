@@ -1,56 +1,99 @@
 package grpc_clients
 
 import (
-	"crypto/tls"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	pb "ride-sharing/shared/proto/trip"
-	"ride-sharing/shared/tracing"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type tripServiceClient struct {
-	Client pb.TripServiceClient
-	conn   *grpc.ClientConn
+	httpClient *http.Client
+	baseURL    string
 }
 
 func NewTripServiceClient() (*tripServiceClient, error) {
 	tripServiceURL := os.Getenv("TRIP_SERVICE_URL")
 	if tripServiceURL == "" {
-		tripServiceURL = "localhost:50051"
+		tripServiceURL = "http://trip-service.onrender.com"
 	}
-
-	creds := insecure.NewCredentials()
-	if strings.Contains(tripServiceURL, "onrender.com") {
-		creds = credentials.NewTLS(&tls.Config{})
+	if !strings.HasPrefix(tripServiceURL, "http") {
+		tripServiceURL = "http://" + tripServiceURL
 	}
+	tripServiceURL = strings.TrimRight(tripServiceURL, "/")
 
-	dialOptions := append(
-		tracing.DialOptionsWithTracing(),
-		grpc.WithTransportCredentials(creds),
-	)
+	return &tripServiceClient{
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:    tripServiceURL,
+	}, nil
+}
 
-	conn, err := grpc.NewClient(tripServiceURL, dialOptions...)
+func (c *tripServiceClient) Close() {}
+
+func (c *tripServiceClient) PreviewTrip(ctx context.Context, req interface{}) (*pb.PreviewTripResponse, error) {
+	url := fmt.Sprintf("%s/trip/preview", c.baseURL)
+	bodyBytes, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
 
-	client := pb.NewTripServiceClient(conn)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	return &tripServiceClient{
-		Client: client,
-		conn:   conn,
-	}, nil
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("trip service returned status %d", resp.StatusCode)
+	}
+
+	var tripRes pb.PreviewTripResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tripRes); err != nil {
+		return nil, err
+	}
+
+	return &tripRes, nil
 }
 
-func (c *tripServiceClient) Close() {
-	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			return
-		}
+func (c *tripServiceClient) CreateTrip(ctx context.Context, req interface{}) (*pb.CreateTripResponse, error) {
+	url := fmt.Sprintf("%s/trip/create", c.baseURL)
+	bodyBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
 	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("trip service returned status %d", resp.StatusCode)
+	}
+
+	var tripRes pb.CreateTripResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tripRes); err != nil {
+		return nil, err
+	}
+
+	return &tripRes, nil
 }

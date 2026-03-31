@@ -70,6 +70,8 @@ func main() {
 		w.Write([]byte("ok"))
 	})
 
+	registerDriverHTTPHandlers(httpMux, svc)
+
 	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			grpcServer.ServeHTTP(w, r)
