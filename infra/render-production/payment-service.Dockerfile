@@ -5,7 +5,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY services/payment-service ./services/payment-service
+COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -o payment-service \
