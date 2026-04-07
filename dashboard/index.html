@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RideSync — System Status</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #ffffff;
+        --fg: #020617;
+        --fg-muted: #64748b;
+        --primary: #4f46e5;
+        --border: #f1f5f9;
+        --surface: #f8fafc;
+        --sans: "Inter", system-ui, -apple-system, sans-serif;
+        --mono: "JetBrains Mono", monospace;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        line-height: 1.5;
+      }
+
+      /* ── Progress Life-line ── */
+      .progress-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--border);
+        z-index: 100;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--primary);
+        width: 0%;
+        transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 0 12px rgba(79, 70, 229, 0.5);
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 80px 24px;
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 64px;
+      }
+
+      /* ── Header ── */
+      header {
+        margin-bottom: 48px;
+      }
+      h1 {
+        font-size: clamp(32px, 5vw, 48px);
+        font-weight: 800;
+        letter-spacing: -0.05em;
+        margin-bottom: 8px;
+      }
+      h1 span {
+        color: #cbd5e1;
+        font-weight: 400;
+      }
+      .status-meta {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--primary);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+        position: relative;
+      }
+      .status-dot::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+        border-radius: 50%;
+        border: 2px solid var(--primary);
+        animation: pulse 2s infinite;
+      }
+
+      /* ── Service Rows ── */
+      .services-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .service-row {
+        display: grid;
+        grid-template-columns: 1fr 80px 120px;
+        align-items: center;
+        padding: 20px 24px;
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        transition: all 0.2s ease;
+      }
+      .service-row:hover {
+        transform: translateX(4px);
+        border-color: var(--primary);
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
+      }
+      .service-name {
+        font-weight: 700;
+        font-size: 15px;
+        color: var(--fg);
+      }
+      .service-url {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-dim);
+        margin-top: 2px;
+      }
+      .service-ms {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--fg-muted);
+        text-align: center;
+      }
+      .service-status {
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        text-align: right;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .status-up {
+        color: #10b981;
+      }
+      .status-down {
+        color: #ef4444;
+      }
+      .status-wait {
+        color: #f59e0b;
+      }
+
+      .spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid rgba(245, 158, 11, 0.2);
+        border-top-color: #f59e0b;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      .cta-area {
+        margin-top: 48px;
+        padding: 32px;
+        background: var(--surface);
+        border-radius: 24px;
+        border: 1px dashed var(--border-strong);
+        text-align: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--fg);
+        color: white;
+        padding: 16px 40px;
+        border-radius: 12px;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 15px;
+        transition: all 0.2s;
+      }
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.2);
+      }
+      .btn.disabled {
+        opacity: 0.2;
+        pointer-events: none;
+      }
+
+      /* ── Right Column ── */
+      .tech-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+      }
+      .cold-start-note {
+        padding: 20px;
+        background: #fffbeb;
+        border: 1px solid #fef3c7;
+        border-radius: 16px;
+        font-size: 13px;
+        color: #92400e;
+      }
+      .arch-label {
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--fg-muted);
+        margin-bottom: 12px;
+        display: block;
+      }
+      .arch-text {
+        font-size: 14px;
+        color: var(--fg-muted);
+        line-height: 1.6;
+      }
+
+      .stack-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .tag {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 600;
+        padding: 4px 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--fg-muted);
+      }
+
+      /* ── Log Terminal ── */
+      .terminal {
+        background: #0f172a;
+        border-radius: 16px;
+        padding: 20px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #94a3b8;
+        height: 240px;
+        overflow-y: auto;
+        box-shadow: 0 20px 50px -15px rgba(15, 23, 42, 0.3);
+      }
+      .log-line {
+        margin-bottom: 6px;
+        display: flex;
+        gap: 10px;
+      }
+      .log-ts {
+        color: #475569;
+      }
+      .log-msg.ok {
+        color: #10b981;
+      }
+      .log-msg.err {
+        color: #f43f5e;
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(2.5);
+          opacity: 0;
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 900px) {
+        .container {
+          grid-template-columns: 1fr;
+          padding: 40px 20px;
+          gap: 48px;
+        }
+        .service-row {
+          grid-template-columns: 1fr auto;
+          padding: 16px 20px;
+          gap: 8px;
+        }
+        .service-ms {
+          display: none;
+        }
+        .tech-panel {
+          gap: 40px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+
+    <div class="container">
+      <!-- Interactive Dashboard -->
+      <main style="animation: fadeUp 0.8s ease both">
+        <header>
+          <div class="status-meta">
+            <div class="status-dot"></div>
+            Handshake Protocol
+          </div>
+          <h1>RideSync</h1>
+        </header>
+
+        <div class="services-list" id="services-list"></div>
+
+        <div class="cta-area">
+          <p class="arch-text" id="cta-status" style="margin-bottom: 24px">
+            Handshaking with distributed service mesh...
+          </p>
+          <a
+            href="#"
+            class="btn disabled"
+            id="launch-btn"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Open RideSync</a
+          >
+        </div>
+      </main>
+
+      <!-- Technical Brief & Logs -->
+      <aside style="animation: fadeUp 0.8s 0.2s ease both">
+        <div class="tech-panel">
+          <div class="cold-start-note">
+            <strong>Infrastructure Note:</strong> Services are hosted on Render
+            free-tier. First load requires a ~60s cold-start handshake while
+            clusters initialize.
+          </div>
+
+          <section>
+            <span class="arch-label">// Architecture Note</span>
+            <p class="arch-text">
+              This is a backend architecture demo, not a UI/UX showcase.
+              RideSync is engineered for production correctness — distributed
+              microservices with strict inter-service integrity, async event
+              streaming, and end-to-end observability.
+            </p>
+            <p class="arch-text" style="margin-top: 12px">
+              The live demo runs a simplified HTTP build on Render's free tier.
+              The production architecture uses gRPC + Protocol Buffers for typed
+              inter-service contracts, Kubernetes for orchestration, RabbitMQ
+              for async event streaming, and OpenTelemetry + Jaeger for
+              distributed tracing. These are intentionally omitted here —
+              Render's infrastructure does not support them.
+            </p>
+          </section>
+
+          <section>
+            <span class="arch-label">// Production Stack</span>
+            <div class="stack-tags">
+              <span class="tag">Go</span> <span class="tag">gRPC</span>
+              <span class="tag">Protobuf</span>
+              <span class="tag">Kubernetes</span>
+              <span class="tag">RabbitMQ</span> <span class="tag">Otel</span>
+              <span class="tag">Jaeger</span> <span class="tag">MongoDB</span>
+              <span class="tag">Docker</span> <span class="tag">Tilt</span>
+            </div>
+          </section>
+
+          <section>
+            <span class="arch-label">// Live Event Stream (STDOUT)</span>
+            <div class="terminal" id="terminal">
+              <div class="log-line">
+                <span class="log-ts">></span>
+                <span class="log-msg"
+                  >Orchestrator online. Awaiting heartbeats...</span
+                >
+              </div>
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const SERVICES = [
+        {
+          id: "gateway",
+          name: "API Gateway",
+          url: "https://ridesync-api-gateway-8ywm.onrender.com",
+          health: "/health",
+        },
+        {
+          id: "trip",
+          name: "Trip Service",
+          url: "https://ridesync-trip-service.onrender.com",
+          health: "/health",
+        },
+        {
+          id: "driver",
+          name: "Driver Service",
+          url: "https://ridesync-driver-service.onrender.com",
+          health: "/health",
+        },
+        {
+          id: "payment",
+          name: "Payment Service",
+          url: "https://ridesync-payment-service.onrender.com",
+          health: "/health",
+        },
+        {
+          id: "frontend",
+          name: "App Frontend",
+          url: "https://ridesync-frontend-15p6.onrender.com",
+          health: "/",
+        },
+      ];
+
+      const FRONTEND_URL = "https://ridesync-frontend-15p6.onrender.com";
+      const state = {};
+      SERVICES.forEach((s) => (state[s.id] = { status: "pending" }));
+
+      function log(msg, cls = "") {
+        const term = document.getElementById("terminal");
+        const line = document.createElement("div");
+        line.className = "log-line";
+        const ts = new Date().toLocaleTimeString([], {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        line.innerHTML = `<span class="log-ts">[${ts}]</span><span class="log-msg ${cls}">${msg}</span>`;
+        term.appendChild(line);
+        term.scrollTop = term.scrollHeight;
+      }
+
+      function build() {
+        const list = document.getElementById("services-list");
+        SERVICES.forEach((s) => {
+          const el = document.createElement("div");
+          el.className = "service-row";
+          el.id = `row-${s.id}`;
+          el.innerHTML = `
+        <div>
+          <div class="service-name">${s.name}</div>
+          <div class="service-url">${s.url.replace("https://", "")}</div>
+        </div>
+        <div class="service-ms" id="ms-${s.id}">--</div>
+        <div class="service-status status-wait" id="st-${s.id}">
+          <div class="spinner"></div>
+          Waking...
+        </div>
+      `;
+          list.appendChild(el);
+        });
+      }
+
+      async function check(s, retryCount = 0) {
+        const start = Date.now();
+        try {
+          const resp = await fetch(s.url + s.health, { mode: "no-cors" });
+          const ms = Date.now() - start;
+          document.getElementById(`ms-${s.id}`).textContent = `${ms}ms`;
+          document.getElementById(`st-${s.id}`).innerHTML = "Online";
+          document.getElementById(`st-${s.id}`).className =
+            "service-status status-up";
+          state[s.id].status = "up";
+          log(`Handshake successful: ${s.name} (${ms}ms)`, "ok");
+        } catch {
+          // Free-tier takes time, so we poll multiple times
+          if (retryCount < 10) {
+            log(`Polling ${s.name} (Attempt ${retryCount + 1})...`);
+            setTimeout(() => check(s, retryCount + 1), 5000);
+          } else {
+            document.getElementById(`st-${s.id}`).innerHTML = "Offline";
+            document.getElementById(`st-${s.id}`).className =
+              "service-status status-down";
+            state[s.id].status = "down";
+            log(`Handshake failed: ${s.name} timed out.`, "err");
+          }
+        }
+        update();
+      }
+
+      function update() {
+        const up = Object.values(state).filter((s) => s.status === "up").length;
+        const done = Object.values(state).filter(
+          (s) => s.status !== "pending",
+        ).length;
+        document.getElementById("progress-fill").style.width =
+          `${(done / 5) * 100}%`;
+
+        if (done === 5) {
+          const btn = document.getElementById("launch-btn");
+          const ctaStatus = document.getElementById("cta-status");
+          btn.className = "btn";
+          btn.href = FRONTEND_URL;
+          ctaStatus.textContent =
+            up === 5
+              ? "System mesh fully synchronized."
+              : "Handshake partial. Degraded mode active.";
+          log("Mesh synchronization complete. User proxy established.");
+        }
+      }
+
+      build();
+      SERVICES.forEach((s, i) => setTimeout(() => check(s), i * 400));
+    </script>
+  </body>
+</html>
