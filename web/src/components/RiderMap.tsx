@@ -22,6 +22,7 @@ import {
 import { RoutingControl } from "./RoutingControl";
 import { API_URL } from "../constants";
 import { RiderTripOverview } from "./RiderTripOverview";
+import { Dialog } from "./ui/dialog";
 import {
   BackendEndpoints,
   HTTPTripPreviewRequestPayload,
@@ -29,6 +30,7 @@ import {
   HTTPTripStartRequestPayload,
   TripEvents,
 } from "../contracts";
+import { Button } from "./ui/button";
 
 const userMarkerIcon =
   typeof window !== "undefined"
@@ -81,6 +83,7 @@ interface RiderMapProps {
 export default function RiderMap({ onRouteSelected }: RiderMapProps) {
   const [trip, setTrip] = useState<TripPreview | null>(null);
   const [destination, setDestination] = useState<[number, number] | null>(null);
+  const [showOSRMInfo, setShowOSRMInfo] = useState(true);
 
   // isRequesting tracks the HTTP call to /trip/start
   const [isRequesting, setIsRequesting] = useState(false);
@@ -238,6 +241,30 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
 
   return (
     <div className="relative flex flex-col md:flex-row h-screen overflow-hidden bg-slate-50">
+      <Dialog
+        isOpen={showOSRMInfo}
+        onClose={() => setShowOSRMInfo(false)}
+        title="Infrastructure Note"
+        description="This platform utilizes the public OSRM demo server for all routing and distance calculations. As this is a shared community resource, 100% uptime is not guaranteed."
+      >
+        <div className="space-y-4">
+          <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              The primary focus of <strong>RideSync</strong> is to demonstrate
+              distributed systems engineering and microservices orchestration.
+              If the map fails to generate routes, the OSRM API may be
+              temporarily unavailable.
+            </p>
+          </div>
+          <Button
+            className="w-full py-6 rounded-2xl font-bold"
+            onClick={() => setShowOSRMInfo(false)}
+          >
+            I Understand
+          </Button>
+        </div>
+      </Dialog>
+
       <div className="relative flex-1 h-full">
         <MapContainer
           center={[location.latitude, location.longitude]}
