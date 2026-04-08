@@ -8,16 +8,18 @@ import {
   Popup,
   Rectangle,
   TileLayer,
+  useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import { getGeohashBounds } from "../utils/geohash";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapClickHandler } from "./MapClickHandler";
 import {
   RouteFare,
   RequestRideProps,
   TripPreview,
   HTTPTripStartResponse,
+  Coordinate,
 } from "../types";
 import { RoutingControl } from "./RoutingControl";
 import { API_URL } from "../constants";
@@ -32,49 +34,9 @@ import {
 } from "../contracts";
 import { Button } from "./ui/button";
 
-const userMarkerIcon =
-  typeof window !== "undefined"
-    ? L.divIcon({
-        className: "user-marker-pulse",
-        html: '<div class="user-marker-pulse-inner"></div>',
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      })
-    : null;
-
-const destinationMarkerIcon =
-  typeof window !== "undefined"
-    ? L.divIcon({
-        className: "destination-marker",
-        html: `
-    <div class="relative flex flex-col items-center">
-      <svg width="32" height="40" viewBox="0 0 24 30" fill="none" xmlns="http://www.w3.org/2000/svg" class="filter drop-shadow-md">
-        <path d="M12 0C5.37 0 0 5.37 0 12C0 21 12 30 12 30C12 30 24 21 24 12C24 5.37 18.63 0 12 0Z" fill="#dc2626"/>
-        <circle cx="12" cy="12" r="5" fill="white"/>
-      </svg>
-      <div class="w-2 h-1 bg-black/20 rounded-full blur-[1px] mt-0.5"></div>
-    </div>
-  `,
-        iconSize: [32, 42],
-        iconAnchor: [16, 40],
-      })
-    : null;
-
-const driverMarkerIcon =
-  typeof window !== "undefined"
-    ? L.divIcon({
-        className: "driver-marker-container",
-        html: `
-    <div class="driver-marker-icon">
-      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
-      </svg>
-    </div>
-  `,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-      })
-    : null;
+import { MapControls } from "./MapControls";
+import { MapSync } from "./MapSync";
+import { userMarkerIcon, destinationMarkerIcon, driverMarkerIcon } from "../lib/map-icons";
 
 interface RiderMapProps {
   onRouteSelected?: (distance: number) => void;
@@ -84,20 +46,59 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
   const [trip, setTrip] = useState<TripPreview | null>(null);
   const [destination, setDestination] = useState<[number, number] | null>(null);
   const [showOSRMInfo, setShowOSRMInfo] = useState(true);
+  const [location, setLocation] = useState<Coordinate>({
+    latitude: 37.7749,
+    longitude: -122.4194,
+  });
 
-  // isRequesting tracks the HTTP call to /trip/start
   const [isRequesting, setIsRequesting] = useState(false);
-  // isMatching tracks the entire phase from clicking "Request" until a driver is found/error
   const [isMatching, setIsMatching] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(true);
 
   const mapRef = useRef<L.Map>(null);
   const userID = useMemo(() => crypto.randomUUID(), []);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const location = {
-    latitude: 37.7749,
-    longitude: -122.4194,
-  };
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const newLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+          setLocation(newLocation);
+        },
+        (error) => {
+          console.error("Error watching location:", error);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, []);
+
+  const requestCurrentLocation = useCallback(() => {
+    setIsFollowing(true);
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const newLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+          setLocation(newLocation);
+        },
+        (error) => {
+          console.error("Error getting location:", error);
+          alert(
+            "Could not get your location. Please check your browser permissions.",
+          );
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      );
+    }
+  }, []);
 
   const {
     drivers,
@@ -108,7 +109,6 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
     resetTripStatus,
   } = useRiderStreamConnection(location, userID);
 
-  // Clear matching state when we move to next phases or errors
   useEffect(() => {
     if (
       tripStatus === TripEvents.DriverAssigned ||
@@ -121,10 +121,11 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
   }, [tripStatus]);
 
   const handleMapClick = async (e: L.LeafletMouseEvent) => {
-    // 🚫 Ignore clicks coming from controls
     if ((e.originalEvent.target as HTMLElement).closest(".map-control")) {
       return;
     }
+
+    setIsFollowing(false);
 
     if (trip?.tripID || isMatching || isRequesting) {
       return;
@@ -142,8 +143,14 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
         destination: [e.latlng.lat, e.latlng.lng],
       });
 
+      if (!data.route || !data.route.geometry || data.route.geometry.length === 0) {
+        console.error("No route found in response:", data);
+        alert("No route found between these locations. OSRM might be failing in this region.");
+        return;
+      }
+
       const parsedRoute = data.route.geometry[0].coordinates.map(
-        (coord) => [coord.longitude, coord.latitude] as [number, number],
+        (coord) => [coord.latitude, coord.longitude] as [number, number],
       );
 
       setTrip({
@@ -185,6 +192,11 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
   };
 
   const handleStartTrip = async (fare: RouteFare) => {
+    if (!trip || !trip.route || trip.route.length === 0) {
+      alert("No valid route found. Please select a destination again.");
+      return;
+    }
+
     setIsRequesting(true);
     setIsMatching(true);
     try {
@@ -204,7 +216,7 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
       });
 
       const json = await response.json();
-      const data = json.data as HTTPTripStartResponse;
+      const { data } = json as { data: HTTPTripStartResponse };
 
       if (response.ok && trip) {
         setTrip(
@@ -273,53 +285,17 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
           ref={mapRef}
           zoomControl={false}
         >
+          <MapSync location={location} isFollowing={isFollowing} />
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors &copy; <a href='https://carto.com/'>CARTO</a>"
           />
 
-          {/* Floating Controls */}
-          <div className="map-control absolute top-6 right-6 z-[9999] flex flex-col gap-2">
-            <div className="bg-white p-2 rounded-2xl shadow-xl border border-slate-100 flex flex-col gap-1">
-              <button
-                onClick={() => mapRef.current?.zoomIn()}
-                className="p-2 hover:bg-slate-50 rounded-lg transition-colors text-slate-600"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-              </button>
-              <div className="h-px bg-slate-100 mx-1" />
-              <button
-                onClick={() => mapRef.current?.zoomOut()}
-                className="p-2 hover:bg-slate-50 rounded-lg transition-colors text-slate-600"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M20 12H4"
-                  />
-                </svg>
-              </button>
-            </div>
-          </div>
+          <MapControls 
+            mapRef={mapRef} 
+            onRecenter={requestCurrentLocation} 
+            isFollowing={isFollowing} 
+          />
 
           <Marker
             position={[location.latitude, location.longitude]}

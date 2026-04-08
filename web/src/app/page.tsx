@@ -90,7 +90,7 @@ function HomeContent() {
           <div className="relative z-10 w-full max-w-4xl px-6 flex flex-col items-center text-center">
             <div className="inline-flex items-center rounded-full border border-primary/10 bg-primary/5 px-4 py-1.5 mb-8 animate-in slide-in-from-top duration-700">
               <span className="text-sm font-medium text-primary">
-                Now live in San Francisco
+                Now live worldwide
               </span>
             </div>
 

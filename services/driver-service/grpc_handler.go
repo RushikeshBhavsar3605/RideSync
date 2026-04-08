@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	pb "ride-sharing/shared/proto/driver"
 
 	"google.golang.org/grpc"
@@ -24,9 +25,10 @@ func NewGrpcHandler(s *grpc.Server, service *Service) {
 }
 
 func (h *grpcHandler) RegisterDriver(ctx context.Context, req *pb.RegisterDriverRequest) (*pb.RegisterDriverResponse, error) {
-	driver, err := h.service.RegisterDriver(req.GetDriverId(), req.GetPackageSlug())
+	driver, err := h.service.RegisterDriver(req.GetDriverId(), req.GetPackageSlug(), req.GetLocation())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to register driver")
+		log.Printf("Internal error registering driver: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to register driver: %v", err)
 	}
 
 	return &pb.RegisterDriverResponse{

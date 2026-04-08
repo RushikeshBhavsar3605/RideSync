@@ -18,8 +18,8 @@ func (o *OsrmApiResponse) ToProto() *pb.Route {
 	coordinates := make([]*pb.Coordinate, len(geometry))
 	for i, coord := range geometry {
 		coordinates[i] = &pb.Coordinate{
-			Latitude:  coord[0],
-			Longitude: coord[1],
+			Latitude:  coord[1],
+			Longitude: coord[0],
 		}
 	}
 
