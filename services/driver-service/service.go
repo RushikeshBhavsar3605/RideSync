@@ -27,6 +27,9 @@ func NewService() *Service {
 }
 
 func (s *Service) FindAvailableDrivers(packageType string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var matchingDrivers []string
 
 	for _, driver := range s.drivers {
@@ -42,32 +45,55 @@ func (s *Service) FindAvailableDrivers(packageType string) []string {
 	return matchingDrivers
 }
 
-func (s *Service) RegisterDriver(driverId string, packageSlug string) (*pb.Driver, error) {
+func (s *Service) RegisterDriver(driverId string, packageSlug string, initialLocation *pb.Location) (*pb.Driver, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	randomIndex := math.IntN(len(PredefinedRoutes))
-	randomRoute := PredefinedRoutes[randomIndex]
+	// Check if driver already exists
+	var existingDriver *DriverInMap
+	for _, d := range s.drivers {
+		if d.Driver.Id == driverId {
+			existingDriver = d
+			break
+		}
+	}
+
+	var lat, lon float64
+	var randomIndex int
+
+	if initialLocation != nil {
+		lat = initialLocation.Latitude
+		lon = initialLocation.Longitude
+		randomIndex = math.IntN(len(PredefinedRoutes)) // Still used for avatar/plate randomness
+	} else {
+		randomIndex = math.IntN(len(PredefinedRoutes))
+		randomRoute := PredefinedRoutes[randomIndex]
+		lat = randomRoute[0][0]
+		lon = randomRoute[0][1]
+	}
 
 	randomPlate := GenerateRandomPlate()
 	randomAvatar := util.GetRandomAvatar(randomIndex)
 
-	// we can ignore this property for now, but it must be sent to the frontend.
-	geohash := geohash.Encode(randomRoute[0][0], randomRoute[0][1])
+	geohashStr := geohash.Encode(lat, lon)
 
 	driver := &pb.Driver{
 		Id:             driverId,
-		Geohash:        geohash,
-		Location:       &pb.Location{Latitude: randomRoute[0][0], Longitude: randomRoute[0][1]},
+		Geohash:        geohashStr,
+		Location:       &pb.Location{Latitude: lat, Longitude: lon},
 		Name:           "John Doe",
 		PackageSlug:    packageSlug,
 		ProfilePicture: randomAvatar,
 		CarPlate:       randomPlate,
 	}
 
-	s.drivers = append(s.drivers, &DriverInMap{
-		Driver: driver,
-	})
+	if existingDriver != nil {
+		existingDriver.Driver = driver
+	} else {
+		s.drivers = append(s.drivers, &DriverInMap{
+			Driver: driver,
+		})
+	}
 
 	return driver, nil
 }
@@ -76,9 +102,10 @@ func (s *Service) UnregisterDriver(driverId string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for i, driver := range s.drivers {
-		if driver.Driver.Id == driverId {
+	for i := 0; i < len(s.drivers); i++ {
+		if s.drivers[i].Driver.Id == driverId {
 			s.drivers = append(s.drivers[:i], s.drivers[i+1:]...)
+			i-- // Adjust index after removal
 		}
 	}
 }

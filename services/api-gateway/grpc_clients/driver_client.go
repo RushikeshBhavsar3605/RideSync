@@ -1,6 +1,7 @@
 package grpc_clients
 
 import (
+	"context"
 	"os"
 	pb "ride-sharing/shared/proto/driver"
 	"ride-sharing/shared/tracing"
@@ -44,4 +45,12 @@ func (c *driverServiceClient) Close() {
 			return
 		}
 	}
+}
+
+func (c *driverServiceClient) RegisterDriver(ctx context.Context, req *pb.RegisterDriverRequest) (*pb.RegisterDriverResponse, error) {
+	return c.Client.RegisterDriver(ctx, req)
+}
+
+func (c *driverServiceClient) UnregisterDriver(ctx context.Context, req *pb.RegisterDriverRequest) (*pb.RegisterDriverResponse, error) {
+	return c.Client.UnregisterDriver(ctx, req)
 }

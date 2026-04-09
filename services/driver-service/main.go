@@ -69,7 +69,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("Starting gRPC server Trip service on port %s", lis.Addr().String())
+	log.Printf("Starting gRPC server Driver service on port %s", lis.Addr().String())
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {

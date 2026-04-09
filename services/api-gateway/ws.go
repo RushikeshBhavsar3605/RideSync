@@ -7,7 +7,7 @@ import (
 	"ride-sharing/services/api-gateway/grpc_clients"
 	"ride-sharing/shared/contracts"
 	"ride-sharing/shared/messaging"
-	"ride-sharing/shared/proto/driver"
+	pb "ride-sharing/shared/proto/driver"
 )
 
 var (
@@ -87,26 +87,58 @@ func handleDriversWebSocket(w http.ResponseWriter, r *http.Request, rb *messagin
 
 	driverService, err := grpc_clients.NewDriverServiceClient()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Failed to create driver service client: %v", err)
+		return
 	}
 
 	// Closing connections
 	defer func() {
 		connManager.Remove(userID)
 
-		driverService.Client.UnregisterDriver(ctx, &driver.RegisterDriverRequest{
+		_, err := driverService.UnregisterDriver(ctx, &pb.RegisterDriverRequest{
 			DriverId:    userID,
 			PackageSlug: packageSlug,
 		})
+		if err != nil {
+			log.Printf("Error unregistering driver: %v", err)
+		}
 
 		driverService.Close()
 
 		log.Println("Driver unregistered: ", userID)
 	}()
 
-	driverData, err := driverService.Client.RegisterDriver(ctx, &driver.RegisterDriverRequest{
+	// Wait for initial location message
+	var initialLocation *pb.Location
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Printf("Error reading initial message: %v", err)
+			return
+		}
+
+		var msg struct {
+			Type string `json:"type"`
+			Data struct {
+				Location pb.Location `json:"location"`
+			} `json:"data"`
+		}
+
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("Error unmarshaling initial message: %v", err)
+			continue
+		}
+
+		if msg.Type == contracts.DriverCmdLocation {
+			initialLocation = &msg.Data.Location
+			break
+		}
+	}
+
+	driverData, err := driverService.RegisterDriver(ctx, &pb.RegisterDriverRequest{
 		DriverId:    userID,
 		PackageSlug: packageSlug,
+		Location:    initialLocation,
 	})
 	if err != nil {
 		log.Printf("Error registering driver: %v", err)
