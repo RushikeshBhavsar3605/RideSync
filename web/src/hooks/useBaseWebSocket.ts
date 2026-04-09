@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from "react";
 import { WEBSOCKET_URL } from "../constants";
-import { ServerWsMessage, TripEvents, isValidWsMessage } from '../contracts';
+import { ServerWsMessage, isValidWsMessage } from "../contracts";
 
 interface useBaseWebSocketProps {
   endpoint: string;
@@ -8,7 +8,11 @@ interface useBaseWebSocketProps {
   onOpen?: () => void;
 }
 
-export function useBaseWebSocket({ endpoint, onMessage, onOpen }: useBaseWebSocketProps) {
+export function useBaseWebSocket({
+  endpoint,
+  onMessage,
+  onOpen,
+}: useBaseWebSocketProps) {
   const [error, setError] = useState<string | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
   const onMessageRef = useRef(onMessage);
@@ -46,28 +50,34 @@ export function useBaseWebSocket({ endpoint, onMessage, onOpen }: useBaseWebSock
     };
 
     websocket.onclose = () => {
-      console.log('WebSocket closed');
+      console.log("WebSocket closed");
     };
 
     websocket.onerror = (event) => {
-      setError('WebSocket error occurred');
-      console.error('WebSocket error:', event);
+      setError("WebSocket error occurred");
+      console.error("WebSocket error:", event);
     };
 
     return () => {
-      if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+      if (
+        websocket.readyState === WebSocket.OPEN ||
+        websocket.readyState === WebSocket.CONNECTING
+      ) {
         websocket.close();
       }
     };
   }, [endpoint]);
 
-  const sendMessage = useCallback((message: any) => {
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
-    } else {
-      console.warn("WebSocket is not open. State:", ws?.readyState);
-    }
-  }, [ws]);
+  const sendMessage = useCallback(
+    (message: Record<string, unknown>) => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message));
+      } else {
+        console.warn("WebSocket is not open. State:", ws?.readyState);
+      }
+    },
+    [ws],
+  );
 
   return { ws, error, sendMessage, setError };
 }

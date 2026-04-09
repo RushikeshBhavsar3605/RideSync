@@ -8,7 +8,6 @@ import {
   Popup,
   Rectangle,
   TileLayer,
-  useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import { getGeohashBounds } from "../utils/geohash";
@@ -36,7 +35,11 @@ import { Button } from "./ui/button";
 
 import { MapControls } from "./MapControls";
 import { MapSync } from "./MapSync";
-import { userMarkerIcon, destinationMarkerIcon, driverMarkerIcon } from "../lib/map-icons";
+import {
+  userMarkerIcon,
+  destinationMarkerIcon,
+  driverMarkerIcon,
+} from "../lib/map-icons";
 
 interface RiderMapProps {
   onRouteSelected?: (distance: number) => void;
@@ -143,9 +146,15 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
         destination: [e.latlng.lat, e.latlng.lng],
       });
 
-      if (!data.route || !data.route.geometry || data.route.geometry.length === 0) {
+      if (
+        !data.route ||
+        !data.route.geometry ||
+        data.route.geometry.length === 0
+      ) {
         console.error("No route found in response:", data);
-        alert("No route found between these locations. OSRM might be failing in this region.");
+        alert(
+          "No route found between these locations. OSRM might be failing in this region.",
+        );
         return;
       }
 
@@ -291,10 +300,10 @@ export default function RiderMap({ onRouteSelected }: RiderMapProps) {
             attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors &copy; <a href='https://carto.com/'>CARTO</a>"
           />
 
-          <MapControls 
-            mapRef={mapRef} 
-            onRecenter={requestCurrentLocation} 
-            isFollowing={isFollowing} 
+          <MapControls
+            mapRef={mapRef}
+            onRecenter={requestCurrentLocation}
+            isFollowing={isFollowing}
           />
 
           <Marker

@@ -1,16 +1,12 @@
 "use client";
 
-// Assets
-import "leaflet/dist/leaflet.css";
-// Fix for default marker icon
-import icon from "leaflet/dist/images/marker-icon.png";
-import iconShadow from "leaflet/dist/images/marker-shadow.png";
 import dynamic from "next/dynamic";
 import { Button } from "../components/ui/button";
 import { useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { CarPackageSlug } from "../types";
 import { DriverPackageSelector } from "../components/DriverPackageSelector";
+import MapInit from "../components/MapInit";
 
 // Dynamically import components that use Leaflet
 const DriverMap = dynamic(
@@ -20,19 +16,6 @@ const DriverMap = dynamic(
 const RiderMap = dynamic(() => import("../components/RiderMap"), {
   ssr: false,
 });
-
-// Initialize Leaflet icon only on client side
-if (typeof window !== "undefined") {
-  import("leaflet").then((L) => {
-    const DefaultIcon = L.default.icon({
-      iconUrl: icon.src,
-      shadowUrl: iconShadow.src,
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-    });
-    L.default.Marker.prototype.options.icon = DefaultIcon;
-  });
-}
 
 function HomeContent() {
   const [userType, setUserType] = useState<"driver" | "rider" | null>(null);
@@ -44,6 +27,7 @@ function HomeContent() {
   if (payment === "success") {
     return (
       <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <MapInit />
         <div className="bg-white p-10 rounded-3xl shadow-2xl text-center max-w-md w-full border border-slate-100 animate-in fade-in zoom-in duration-500">
           <div className="mb-8">
             <div className="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -81,6 +65,7 @@ function HomeContent() {
 
   return (
     <main className="min-h-screen bg-white">
+      <MapInit />
       {userType === null && (
         <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
           {/* Decorative background elements */}
