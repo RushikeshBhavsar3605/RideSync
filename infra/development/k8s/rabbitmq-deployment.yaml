@@ -18,20 +18,34 @@ spec:
           image: rabbitmq:3-management
           ports:
             - containerPort: 5672 # AMQP port
-            - containerPort: 15672 # Management UI port
-          readinessProbe:
+            - containerPort: 15672 # Management UI
+
+          # 🔥 CRITICAL: prevents early restarts
+          startupProbe:
             exec:
-              command: ["rabbitmq-diagnostics", "check_running"]
-            initialDelaySeconds: 20
+              command: ["rabbitmq-diagnostics", "ping"]
+            failureThreshold: 20 # ~200s max startup window
             periodSeconds: 10
-            timeoutSeconds: 15
-            failureThreshold: 3
+            timeoutSeconds: 10
+
+          # 🟢 Traffic gate
+          readinessProbe:
+            tcpSocket:
+              port: 5672
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          # 🔴 Restart only if truly dead
           livenessProbe:
             exec:
-              command: ["rabbitmq-diagnostics", "check_running"]
-            initialDelaySeconds: 60
+              command: ["rabbitmq-diagnostics", "ping"]
+            initialDelaySeconds: 150
             periodSeconds: 30
-            timeoutSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
+
           resources:
             requests:
               memory: "512Mi"
@@ -39,6 +53,7 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "250m"
+
           env:
             - name: RABBITMQ_DEFAULT_USER
               valueFrom:
@@ -52,9 +67,11 @@ spec:
                   key: password
             - name: RABBITMQ_MNESIA_BASE
               value: /var/lib/rabbitmq/mnesia
+
           volumeMounts:
             - name: rabbitmq-data
               mountPath: /var/lib/rabbitmq
+
   volumeClaimTemplates:
     - metadata:
         name: rabbitmq-data
@@ -63,6 +80,7 @@ spec:
         resources:
           requests:
             storage: 1Gi
+
 ---
 apiVersion: v1
 kind: Service

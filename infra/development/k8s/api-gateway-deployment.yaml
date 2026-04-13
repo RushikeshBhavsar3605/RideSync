@@ -36,6 +36,16 @@ spec:
                 configMapKeyRef:
                   key: JAEGER_ENDPOINT
                   name: app-config
+            - name: TRIP_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: TRIP_SERVICE_URL
+                  name: app-config
+            - name: DRIVER_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: DRIVER_SERVICE_URL
+                  name: app-config
             - name: RABBITMQ_URI
               valueFrom:
                 secretKeyRef:
