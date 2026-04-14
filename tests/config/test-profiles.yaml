@@ -1,0 +1,10 @@
+rabbitmq_uri: "amqp://guest:guest@localhost:5672/"
+scenarios:
+  - name: "standard-reliability"
+    type: "trip-creation"
+    rate: 100
+    duration: "10m"
+  - name: "end-to-end"
+    type: "full-flow"
+    rate: 50
+    duration: "10m"

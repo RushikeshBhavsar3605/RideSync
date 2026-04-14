@@ -55,9 +55,9 @@ func (r *RabbitMQ) ConsumeMessages(queueName string, handler MessageHandler) err
 	// This tells RabbitMQ not to give more than one message to a service at a time.
 	// The worker will only get the next message after it has acknowledged the previous one.
 	err := r.Channel.Qos(
-		1,     // prefetchCount: Limit to 1 unacknowledged message per consumer
-		0,     // prefetchSize: No specific limit on message size
-		false, // global: Apply prefetchCount to each consumer individually
+		100,   // prefetchCount: Increased from 1 to 100 for high-throughput
+		0,     // prefetchSize
+		false, // global
 	)
 	if err != nil {
 		return fmt.Errorf("failed to set QoS: %v", err)
@@ -78,42 +78,46 @@ func (r *RabbitMQ) ConsumeMessages(queueName string, handler MessageHandler) err
 
 	go func() {
 		for msg := range msgs {
-			if err := tracing.TracedConsumer(msg, func(ctx context.Context, d amqp.Delivery) error {
-				log.Printf("Received a message: %s", msg.Body)
+			// Spawn a goroutine for each message to allow concurrent processing.
+			// The prefetchCount (QoS) handles the actual concurrency limit.
+			go func(m amqp.Delivery) {
+				if err := tracing.TracedConsumer(m, func(ctx context.Context, d amqp.Delivery) error {
+					log.Printf("Received a message: %s", m.Body)
 
-				cfg := retry.DefaultConfig()
-				err := retry.WithBackoff(ctx, cfg, func() error {
-					return handler(ctx, d)
-				})
-				if err != nil {
-					log.Printf("Message processing failed after %d retries for message ID: %s, err: %v", cfg.MaxRetries, d.MessageId, err)
+					cfg := retry.DefaultConfig()
+					err := retry.WithBackoff(ctx, cfg, func() error {
+						return handler(ctx, d)
+					})
+					if err != nil {
+						log.Printf("Message processing failed after %d retries for message ID: %s, err: %v", cfg.MaxRetries, d.MessageId, err)
 
-					// Add failure context before sending to the DLQ
-					headers := amqp.Table{}
-					if d.Headers != nil {
-						headers = d.Headers
+						// Add failure context before sending to the DLQ
+						headers := amqp.Table{}
+						if d.Headers != nil {
+							headers = d.Headers
+						}
+
+						headers["x-death-reason"] = err.Error()
+						headers["x-origin-exchange"] = d.Exchange
+						headers["x-original-routing-key"] = d.RoutingKey
+						headers["x-retry-count"] = cfg.MaxRetries
+						d.Headers = headers
+
+						// Reject without requeue - message will go to the DLQ
+						_ = d.Reject(false)
+						return err
 					}
 
-					headers["x-death-reason"] = err.Error()
-					headers["x-origin-exchange"] = d.Exchange
-					headers["x-original-routing-key"] = d.RoutingKey
-					headers["x-retry-count"] = cfg.MaxRetries
-					d.Headers = headers
+					// Only Ack if the handler succeeds
+					if ackErr := m.Ack(false); ackErr != nil {
+						log.Printf("ERROR: Failed to Ack message: %v. Message body: %s", ackErr, m.Body)
+					}
 
-					// Reject without requeue - message will go to the DLQ
-					_ = d.Reject(false)
-					return err
+					return nil
+				}); err != nil {
+					log.Printf("Error processing message: %v", err)
 				}
-
-				// Only Ack if the handler succeeds
-				if ackErr := msg.Ack(false); ackErr != nil {
-					log.Printf("ERROR: Failed to Ack message: %v. Message body: %s", ackErr, msg.Body)
-				}
-
-				return nil
-			}); err != nil {
-				log.Printf("Error processing message: %v", err)
-			}
+			}(msg)
 		}
 	}()
 
