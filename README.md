@@ -116,14 +116,13 @@ flowchart RL
     Trip -->|GET /route| OSRM
 
     %% Database Connections
-    Driver -->|Query/Store| Mongo
     Trip -->|Query/Store| Mongo
 
     %% Message Broker Connections
     APIGW -->|Publish/Consume| Rabbit
     Payment -->|Publish/Consume| Rabbit
     Trip -->|Publish/Consume| Rabbit
-    Driver -->|Consume| Rabbit
+    Driver -->|Publish/Consume| Rabbit
 
     %% Broker Internal Exchanges
     Rabbit --> TripEx
@@ -141,27 +140,34 @@ flowchart RL
 
 ```mermaid
 sequenceDiagram
-    participant C as Mobile/Web Client
+    participant R as Rider (Mobile/Web)
     participant G as api-gateway
     participant T as trip-service
     participant Q as RabbitMQ (TripExchange)
     participant D as driver-service
+    participant W as Driver (WebSocket)
 
-    note over C,T: Synchronous (gRPC)
-    C->>G: POST /trip/start
+    note over R,T: Synchronous (gRPC)
+    R->>G: POST /trip/start
     G->>T: gRPC: CreateTrip()
     T-->>G: TripID Created
-    G-->>C: 201 Created
+    G-->>R: 201 Created
 
     note over T,D: Asynchronous (AMQP)
-    T->>Q: Publish: trip.created
-    Q->>D: Consume: trip.created
-        D->>D: Run Matching Logic
-    D->>Q: Publish: driver.assigned
+    T->>Q: Publish: trip.event.created
+    Q->>D: Consume: trip.event.created
+    D->>D: Run Matching Logic
+    D->>Q: Publish: driver.cmd.trip_request
 
-    note over C,Q: Real-time (WebSocket)
-    Q->>G: Consume: driver.assigned
-    G-->>C: WebSocket: Driver Found
+    note over G,W: Real-time (WebSocket)
+    Q->>G: Consume: driver.cmd.trip_request
+    G-->>W: WebSocket: Trip Request
+    W-->>G: WebSocket: Accept
+    G->>Q: Publish: driver.cmd.trip_accept
+    Q->>T: Consume: driver.cmd.trip_accept
+    T->>Q: Publish: trip.event.driver_assigned
+    Q->>G: Consume: trip.event.driver_assigned
+    G-->>R: WebSocket: Driver Assigned
 ```
 
 ### Technology Stack
@@ -304,7 +310,6 @@ The project includes complete deployment configurations for Google Cloud Platfor
 
 - Multi-stage Docker builds for optimized images
 - Kubernetes manifests with health checks and resource limits
-- Managed SSL certificates
 - Secret management
 
 ## Project Structure
