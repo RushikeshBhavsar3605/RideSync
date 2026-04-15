@@ -21,7 +21,7 @@ The system includes a custom-built load testing framework (`tests/load/`) that v
 
 ### Trip Creation — Queue Reliability (`-rate 1000 -duration 2m`)
 
-Publishes `trip.created` events at 1,000 msg/sec and verifies delivery to the real `find_available_drivers` queue.
+Publishes `trip.event.created` events at 1,000 msg/sec and verifies delivery to the real `find_available_drivers` queue.
 
 | Metric             | Result                          |
 | ------------------ | ------------------------------- |
@@ -34,7 +34,7 @@ Publishes `trip.created` events at 1,000 msg/sec and verifies delivery to the re
 
 ### Full End-to-End Flow (`-rate 200 -duration 1m`)
 
-Simulates the complete event chain: `trip.created` → `driver.request` → `driver.accept` → `payment.success`, using mock service orchestrators to traverse all four event hops.
+Simulates the complete event chain: `trip.event.created` → `driver.cmd.trip_request` → `driver.cmd.trip_accept` → `payment.event.success`, using mock service orchestrators to traverse all four event hops.
 
 | Metric             | Result                          |
 | ------------------ | ------------------------------- |
@@ -196,7 +196,7 @@ sequenceDiagram
 
 ### Clean Architecture
 
-Each service follows hexagonal architecture principles with clear separation of concerns:
+The Trip and Payment services follow hexagonal architecture principles with clear separation of concerns:
 
 - **Domain Layer** — Business logic and port definitions
 - **Service Layer** — Use case implementations
@@ -208,10 +208,10 @@ The `tests/load/` package is a purpose-built load testing tool written in Go. It
 
 ### Scenarios
 
-| Scenario flag   | What it tests                                                                                    |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| `trip-creation` | Publishes `trip.created` events and verifies delivery to the real `find_available_drivers` queue |
-| `full-flow`     | Simulates the full 4-hop event chain using mock service orchestrators                            |
+| Scenario flag   | What it tests                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------ |
+| `trip-creation` | Publishes `trip.event.created` events and verifies delivery to the real `find_available_drivers` queue |
+| `full-flow`     | Simulates the full 4-hop event chain using mock service orchestrators                                  |
 
 ### Running Tests
 
@@ -280,24 +280,23 @@ open http://localhost:16686 # Jaeger UI
 
 ## Key Engineering Practices
 
-1. **Distributed Tracing**\
+1. **Distributed Tracing** \
    Full request tracing across all services using OpenTelemetry and Jaeger for debugging and performance monitoring.
 
-2. **Event-Driven Architecture**\
+2. **Event-Driven Architecture** \
    Asynchronous communication via RabbitMQ decouples services and improves resilience. The trip lifecycle is choreographed entirely through events.
 
-3. **Resilience Patterns**\
+3. **Resilience Patterns** \
    Per-request gRPC client pattern prevents cascading failures between services. Failed messages are retried up to 3 times before routing to a Dead Letter Queue.
 
 4. **Protocol Optimization**
    - JSON for external APIs (developer-friendly)
    - Protocol Buffers for internal gRPC communication (performance)
+5. **Infrastructure as Code** \
+   Complete Kubernetes manifests for both development and production environments, including health checks and resource limits.
 
-5. **Infrastructure as Code**\
-   Complete Kubernetes manifests for both development and production environments, including health checks, resource limits, and horizontal pod autoscaling.
-
-6. **Validated Reliability**\
-   A custom load testing framework continuously validates the messaging infrastructure against a 99.9% reliability threshold, with latency percentile tracking and DLQ monitoring.
+6. **Validated Reliability** \
+   A custom load testing framework validates the messaging infrastructure against a 99.9% reliability threshold, with latency percentile tracking and DLQ monitoring.
 
 ## Production Deployment
 
@@ -305,7 +304,6 @@ The project includes complete deployment configurations for Google Cloud Platfor
 
 - Multi-stage Docker builds for optimized images
 - Kubernetes manifests with health checks and resource limits
-- Horizontal pod autoscaling
 - Managed SSL certificates
 - Secret management
 
