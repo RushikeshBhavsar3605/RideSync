@@ -360,3 +360,5 @@ RideSync/
 - **Backend Engineering** — Go, gRPC, Protocol Buffers, WebSocket, AMQP
 - **DevOps** — Docker, Kubernetes, Tilt live-reload, observability-first design
 - **Full-Stack Integration** — Next.js frontend with real-time WebSocket communication
+
+![trace](https://rushikesh-bhavsar.vercel.app/api/ridesync-visit)
