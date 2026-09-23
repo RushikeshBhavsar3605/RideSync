@@ -1,72 +1,64 @@
 # RideSync — Cloud-Native Ride-Sharing Platform
 
-A production-ready, horizontally scalable ride-sharing backend built with microservices architecture using Go, gRPC, and Kubernetes. Designed to handle real-time trip matching, dynamic pricing, and payment processing at scale.
+A full-stack, event-driven ride-sharing platform built with Go microservices, gRPC, RabbitMQ, and Kubernetes. Covers the complete trip lifecycle — from fare preview and driver matching to real-time WebSocket updates and Stripe payment processing.
 
 ## Overview
 
-RideSync is a complete backend system for a ride-sharing application (similar to Uber/Lyft) that demonstrates enterprise-grade software engineering practices. The system handles trip requests, driver matching, real-time location tracking, fare calculation, and payment processing through a distributed microservices architecture.
+RideSync models the core backend of a ride-sharing application (think Uber/Lyft) as a distributed system. Four independent microservices communicate via gRPC for synchronous calls and RabbitMQ for asynchronous events. A Next.js frontend connects riders and drivers in real time through WebSocket connections.
 
-**Key Capabilities:**
+**What it does end-to-end:**
 
-- Real-time trip preview with route calculation and fare estimation
-- Live driver-rider matching via WebSocket connections
-- Event-driven architecture for asynchronous operations
-- Distributed tracing across all services
-- Payment processing with Stripe integration
-- Containerized deployment with Kubernetes orchestration
+1. Rider requests a trip → fare and route previewed via OSRM routing API
+2. Trip is created → `trip.event.created` published to RabbitMQ
+3. Driver-service consumes the event → runs matching logic → notifies best available driver over WebSocket
+4. Driver accepts → event chain updates trip status → rider gets notified in real time
+5. Stripe webhook confirms payment → payment-service records the outcome
 
-## Performance Benchmarks
+## Scalability & Engineering Decisions
 
-The system includes a custom-built load testing framework (`tests/load/`) that validates messaging throughput, end-to-end reliability, and latency under sustained load. Tests run directly against the live RabbitMQ infrastructure.
+RideSync is designed with production-scale constraints and distributed systems best practices in mind. The architecture reflects several core goals:
 
-### Trip Creation — Queue Reliability (`-rate 1000 -duration 2m`)
+- **Stateless microservices** for horizontal scaling behind Kubernetes
+- **Event-driven trip lifecycle** using RabbitMQ to avoid synchronous bottlenecks
+- **Message retry policy** (up to 3 attempts) with Dead Letter Queue (DLQ) for failed event handling
+- **Per-request gRPC communication** to prevent connection contention and cascading failures
+- **Independent service scaling** (Trip, Driver, Payment) based on workload characteristics
+- **Observability-first design** with distributed tracing for latency and failure analysis
 
-Publishes `trip.event.created` events at 1,000 msg/sec and verifies delivery to the real `find_available_drivers` queue.
+Here is a closer look at how these goals are implemented in the code:
 
-| Metric             | Result                          |
-| ------------------ | ------------------------------- |
-| Throughput         | **792 msg/sec**                 |
-| Reliability        | **100.00%** (0 failures, 0 DLQ) |
-| Messages Processed | 99,064                          |
-| P50 Latency        | 217 µs                          |
-| P95 Latency        | 2.9 ms                          |
-| P99 Latency        | 6.6 ms                          |
+### 1. Synchronous + Asynchronous split
 
-### Full End-to-End Flow (`-rate 200 -duration 1m`)
+The rider gets an immediate HTTP 201 after `POST /trip/start`. Everything after that — matching, notification, confirmation — is asynchronous. This prevents the HTTP request from blocking on driver availability and makes each step independently retryable.
 
-Simulates the complete event chain: `trip.event.created` → `driver.cmd.trip_request` → `driver.cmd.trip_accept` → `payment.event.success`, using mock service orchestrators to traverse all four event hops.
+### 2. Event choreography over orchestration
 
-| Metric             | Result                          |
-| ------------------ | ------------------------------- |
-| Throughput         | **162 msg/sec**                 |
-| Reliability        | **100.00%** (0 failures, 0 DLQ) |
-| Messages Processed | 11,377                          |
-| P50 Latency        | 275 µs                          |
-| P95 Latency        | 3.6 ms                          |
-| P99 Latency        | 9.6 ms                          |
+No central orchestrator controls the trip flow. Each service reacts to events and emits its own, keeping services fully decoupled. Adding a new step (e.g., surge pricing, ETA updates) means subscribing a new consumer — no existing service changes.
 
-> The load test runner enforces a **99.9% reliability threshold** and exits with a warning if it is not met.
+### 3. Dead Letter Queue for resilience
 
-## Scalability & Design Goals
+The shared RabbitMQ client (`shared/messaging/`) applies a retry policy to every consumer: messages are nacked and requeued up to 3 times before being routed to `TripDLX`. This prevents poison messages from blocking the queue indefinitely.
 
-RideSync is designed with production-scale constraints and distributed systems best practices:
+### 4. Per-request gRPC clients
 
-- Stateless microservices for horizontal scaling behind Kubernetes
-- Event-driven trip lifecycle using RabbitMQ to avoid synchronous bottlenecks
-- Message retry policy (up to 3 attempts) with Dead Letter Queue (DLQ) for failed event handling
-- Per-request gRPC communication to prevent connection contention and cascading failures
-- Independent service scaling (Trip, Driver, Payment) based on workload characteristics
-- Observability-first design with distributed tracing for latency and failure analysis
+Each inbound HTTP request creates its own gRPC client connection to downstream services rather than sharing a long-lived connection. This prevents a slow or stuck service from holding resources that affect unrelated requests.
+
+### 5. Protocol split — JSON external, Protobuf internal
+
+External APIs use JSON (developer-friendly, easy to inspect). All inter-service gRPC calls use Protocol Buffers — strongly typed, compact, and faster to serialize than JSON.
+
+### 6. Hexagonal architecture in Trip and Payment services
+
+Domain logic has zero dependency on infrastructure. Swapping the MongoDB adapter for a different database, or the RabbitMQ publisher for a different broker, requires changing only the infrastructure layer.
+
+---
 
 ## Architecture
 
-### System Design
-
-The platform consists of four microservices (API Gateway, Trip, Driver, and Payment) communicating via gRPC and RabbitMQ:
+### System Overview
 
 ```mermaid
 flowchart RL
-    %% Subgraph Definitions
     subgraph External [External Clients and Services]
         direction TB
         Stripe[Stripe Webhooks]
@@ -76,13 +68,13 @@ flowchart RL
     end
 
     subgraph Gateway [Gateway Layer]
-        APIGW[api-gateway<br/>Port 8081<br/>HTTP/WebSocket]
+        APIGW[api-gateway<br/>Port 8081<br/>HTTP / WebSocket]
     end
 
     subgraph Backend [Backend Services]
-        Payment[payment-service<br/>Port 9004<br/>Event-Driven]
-        Driver[driver-service<br/>Port 50052<br/>gRPC Server]
-        Trip[trip-service<br/>Port 50051<br/>gRPC Server]
+        Payment[payment-service<br/>Port 9004]
+        Driver[driver-service<br/>Port 50052<br/>gRPC]
+        Trip[trip-service<br/>Port 50051<br/>gRPC]
     end
 
     subgraph Broker [Message Broker]
@@ -97,50 +89,42 @@ flowchart RL
     end
 
     subgraph Obs [Observability]
-        Jaeger[Jaeger<br/>Port 16686 UI<br/>Port 14268 Collector]
+        Jaeger[Jaeger<br/>Port 16686 UI]
     end
 
-    %% --- Relationships ---
-
-    %% External to Gateway
     Stripe -->|POST /webhook/stripe| APIGW
-    Mobile -->|HTTP/WS| APIGW
-    Web -->|HTTP/WS| APIGW
+    Mobile -->|HTTP / WS| APIGW
+    Web -->|HTTP / WS| APIGW
 
-    %% Gateway to Backend
-    APIGW -->|gRPC| Driver
     APIGW -->|gRPC| Trip
+    APIGW -->|gRPC| Driver
 
-    %% Backend Service Inter-connections & Outbound
     Payment -->|HTTPS| Stripe
     Trip -->|GET /route| OSRM
 
-    %% Database Connections
-    Trip -->|Query/Store| Mongo
+    Trip -->|Query / Store| Mongo
 
-    %% Message Broker Connections
-    APIGW -->|Publish/Consume| Rabbit
-    Payment -->|Publish/Consume| Rabbit
-    Trip -->|Publish/Consume| Rabbit
-    Driver -->|Publish/Consume| Rabbit
+    APIGW -->|Publish / Consume| Rabbit
+    Payment -->|Publish / Consume| Rabbit
+    Trip -->|Publish / Consume| Rabbit
+    Driver -->|Publish / Consume| Rabbit
 
-    %% Broker Internal Exchanges
     Rabbit --> TripEx
     Rabbit --> DLX
 
-    %% Observability (Traces)
-    %% Using dotted lines
-    Payment -.->|Traces| Jaeger
-    Driver -.->|Traces| Jaeger
-    Trip -.->|Traces| Jaeger
-    APIGW -.->|Traces| Jaeger
+    Payment -..->|Traces| Jaeger
+    Driver -..->|Traces| Jaeger
+    Trip -..->|Traces| Jaeger
+    APIGW -..->|Traces| Jaeger
 ```
 
 ### Trip Lifecycle — Event Flow
 
+The trip lifecycle is fully choreographed through events. The rider gets an immediate HTTP response (201) while driver matching happens asynchronously in the background.
+
 ```mermaid
 sequenceDiagram
-    participant R as Rider (Mobile/Web)
+    participant R as Rider (Web/Mobile)
     participant G as api-gateway
     participant T as trip-service
     participant Q as RabbitMQ (TripExchange)
@@ -172,179 +156,253 @@ sequenceDiagram
 
 ### Technology Stack
 
-**Backend Services:**
+**Backend:**
 
-| Concern                     | Technology              |
-| --------------------------- | ----------------------- |
-| Language                    | Go 1.23+                |
-| Inter-service communication | gRPC + Protocol Buffers |
-| Async messaging             | RabbitMQ (AMQP)         |
-| Database                    | MongoDB                 |
-| Payment                     | Stripe API              |
+| Concern           | Technology                       |
+| ----------------- | -------------------------------- |
+| Language          | Go 1.23                          |
+| HTTP Router       | Gin                              |
+| Inter-service RPC | gRPC + Protocol Buffers (proto3) |
+| Async messaging   | RabbitMQ — AMQP via `amqp091-go` |
+| Database          | MongoDB                          |
+| Payment           | Stripe API (stripe-go v76)       |
+| Real-time         | WebSocket (`gorilla/websocket`)  |
+| Auth              | JWT (`golang-jwt/jwt v5`)        |
+| Observability     | OpenTelemetry + Jaeger           |
 
 **Infrastructure:**
 
-| Concern            | Technology                  |
-| ------------------ | --------------------------- |
-| Containerization   | Docker (multi-stage builds) |
-| Orchestration      | Kubernetes (Minikube / GKE) |
-| Local dev workflow | Tilt (live reload)          |
-| Observability      | Jaeger (OpenTelemetry)      |
+| Concern             | Technology                                   |
+| ------------------- | -------------------------------------------- |
+| Containerization    | Docker (multi-stage builds, alpine runtime)  |
+| Orchestration       | Kubernetes (Minikube / GKE)                  |
+| Local dev           | Tilt (live reload + port-forward automation) |
+| Distributed tracing | Jaeger (OpenTelemetry collector)             |
 
 **Frontend:**
 
-| Concern   | Technology              |
-| --------- | ----------------------- |
-| Framework | Next.js 15 (React 19)   |
-| Styling   | Tailwind CSS            |
-| Maps      | Leaflet / React-Leaflet |
-| Real-time | WebSocket client        |
+| Concern   | Technology                                    |
+| --------- | --------------------------------------------- |
+| Framework | Next.js 15 (App Router, React 19, TypeScript) |
+| Styling   | Tailwind CSS                                  |
+| Maps      | Leaflet / React-Leaflet                       |
+| Real-time | WebSocket client                              |
 
-### Clean Architecture
+---
 
-The Trip and Payment services follow hexagonal architecture principles with clear separation of concerns:
+## Services
 
-- **Domain Layer** — Business logic and port definitions
-- **Service Layer** — Use case implementations
-- **Infrastructure Layer** — External adapters (gRPC handlers, repositories, event consumers/publishers)
+### `api-gateway` (Port 8081)
 
-## Load Testing
+The single entry point for all external traffic. Handles HTTP requests, manages WebSocket hubs for riders and drivers, bridges the RabbitMQ event bus to WebSocket clients, and proxies calls to internal gRPC services.
 
-The `tests/load/` package is a purpose-built load testing tool written in Go. It connects directly to RabbitMQ and validates the messaging infrastructure under sustained load.
+**HTTP API:**
 
-### Scenarios
+| Method | Route             | Description                                       |
+| ------ | ----------------- | ------------------------------------------------- |
+| `POST` | `/trip/preview`   | Calculate route via OSRM and return fare estimate |
+| `POST` | `/trip/start`     | Create a trip — delegates to trip-service gRPC    |
+| `POST` | `/webhook/stripe` | Receive and validate Stripe payment events        |
+| `WS`   | `/ws/riders`      | Persistent WebSocket connection for riders        |
+| `WS`   | `/ws/drivers`     | Persistent WebSocket connection for drivers       |
 
-| Scenario flag   | What it tests                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------------ |
-| `trip-creation` | Publishes `trip.event.created` events and verifies delivery to the real `find_available_drivers` queue |
-| `full-flow`     | Simulates the full 4-hop event chain using mock service orchestrators                                  |
+**Event Bus (RabbitMQ):**
 
-### Running Tests
+| Direction | Routing Key                  | Purpose                                                         |
+| --------- | ---------------------------- | --------------------------------------------------------------- |
+| Consume   | `driver.cmd.trip_request`    | Forward trip request to matched driver over WebSocket           |
+| Consume   | `trip.event.driver_assigned` | Notify rider of confirmed driver assignment                     |
+| Publish   | `driver.cmd.trip_accept`     | Forward driver's WebSocket acceptance back into the event chain |
 
-```
-# Queue reliability at 1,000 msg/sec for 2 minutes
-go run tests/load/main.go -rate 1000 -duration 2m -scenario trip-creation
+---
 
-# Full end-to-end event chain at 200 msg/sec for 1 minute
-go run tests/load/main.go -rate 200 -duration 1m -scenario full-flow
+### `trip-service` (Port 50051 — gRPC)
 
-# Custom RabbitMQ URI
-go run tests/load/main.go -rate 500 -duration 5m -scenario trip-creation \
-  -rabbitmq-uri amqp://user:pass@host:5672/
-```
+Owns the trip domain. Persists trips in MongoDB, calculates fares, and drives the event-based lifecycle.
 
-Each run saves a timestamped report file (`load-test-report-YYYYMMDD-HHMMSS.txt`) and prints a summary with throughput, reliability, latency percentiles (P50/P95/P99), retry counts, and DLQ counts.
+**gRPC Methods:**
+
+| Method             | Description                                              |
+| ------------------ | -------------------------------------------------------- |
+| `CreateTrip`       | Persists trip in MongoDB, publishes `trip.event.created` |
+| `PreviewTrip`      | Calculates route (OSRM) and fare estimate — no DB write  |
+| `UpdateTripStatus` | Updates trip status field                                |
+| `GetTrip`          | Fetches trip by ID                                       |
+
+**Event Bus (RabbitMQ):**
+
+| Direction | Routing Key                  | Purpose                                             |
+| --------- | ---------------------------- | --------------------------------------------------- |
+| Publish   | `trip.event.created`         | Triggers driver matching after trip creation        |
+| Consume   | `driver.cmd.trip_accept`     | Driver accepted — update status, publish assignment |
+| Publish   | `trip.event.driver_assigned` | Broadcast final driver assignment to gateway        |
+
+**MongoDB — `trips` collection:**
+`trip_id`, `rider_id`, `origin`, `destination`, `status` (pending / active / completed / cancelled), `fare`, `driver_id`, `created_at`
+
+**Architecture:** Hexagonal (domain / service / infrastructure layers)
+
+---
+
+### `driver-service` (Port 50052 — gRPC)
+
+Manages driver state and availability. Runs the matching algorithm when a new trip event arrives.
+
+**gRPC Methods:**
+
+| Method                | Description                               |
+| --------------------- | ----------------------------------------- |
+| `UpdateDriverStatus`  | Toggle driver online / offline / busy     |
+| `GetAvailableDrivers` | Query all drivers with status `available` |
+
+**Event Bus (RabbitMQ):**
+
+| Direction | Routing Key               | Queue                    | Purpose                                         |
+| --------- | ------------------------- | ------------------------ | ----------------------------------------------- |
+| Consume   | `trip.event.created`      | `find_available_drivers` | Run matching on new trip                        |
+| Publish   | `driver.cmd.trip_request` | —                        | Send trip request to matched driver via gateway |
+
+**MongoDB — `drivers` collection:**
+`driver_id`, `name`, `status`, `location`, `current_trip_id`
+
+---
+
+### `payment-service` (Port 9004)
+
+Handles Stripe payment intent creation and webhook-driven confirmation. Stores payment records in MongoDB.
+
+**gRPC Methods:**
+
+| Method                | Description                                   |
+| --------------------- | --------------------------------------------- |
+| `CreatePaymentIntent` | Creates a Stripe PaymentIntent for a trip     |
+| `ConfirmPayment`      | Records confirmed payment from Stripe webhook |
+
+**MongoDB — `payments` collection:**
+`payment_id`, `trip_id`, `rider_id`, `amount`, `currency`, `status`, `stripe_intent_id`
+
+**Architecture:** Hexagonal (domain / service / infrastructure layers)
+
+---
+
+## Shared Libraries (`shared/`)
+
+| Package            | Contents                                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `shared/messaging` | `NewRabbitMQ()`, `Publish()`, `Consume()` — wraps `amqp091-go`, manages `TripExchange` (topic) and `TripDLX`, retry policy |
+| `shared/db`        | `NewMongoClient(uri)` — returns a configured `*mongo.Client`                                                               |
+| `shared/types`     | Common structs: `Trip`, `Driver`, `Payment`, `Location`, `TripStatus`                                                      |
+
+---
+
+## Frontend (`web/`)
+
+A Next.js 15 (App Router) frontend with two real-time dashboards.
+
+| Page      | Description                                                             |
+| --------- | ----------------------------------------------------------------------- |
+| `/`       | Landing page                                                            |
+| `/rider`  | Request a trip, see fare preview, receive live WebSocket status updates |
+| `/driver` | See incoming trip requests, accept / reject, toggle availability        |
+| `/map`    | Live map (Leaflet) showing rider and driver positions                   |
+
+WebSocket connections point to `ws://api-gateway/ws/riders` and `ws://api-gateway/ws/drivers`.
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker
 - Go 1.23+
-- Tilt
-- Kubernetes cluster (Minikube)
+- Docker
 - kubectl
+- Minikube
+- Tilt
 
-### Running Locally
+### Run Locally
 
-```
-# Start all services with hot reload
+```bash
+# Start Minikube
+minikube start
+
+# Start all services with live reload
 tilt up
 
-# Open Tilt UI
+# Open Tilt dashboard
 open http://localhost:10350
 ```
 
+Tilt automatically builds Docker images, applies Kubernetes manifests from `infra/development/`, and sets up port-forwards:
+
+| Service             | Local Address            |
+| ------------------- | ------------------------ |
+| api-gateway         | `http://localhost:8081`  |
+| RabbitMQ Management | `http://localhost:15672` |
+| Jaeger UI           | `http://localhost:16686` |
+| MongoDB             | `localhost:27017`        |
+
 ### Monitoring
 
-```
-# View running pods
+```bash
+# Pod status
 kubectl get pods
 
 # Kubernetes dashboard
 minikube dashboard
 
 # Distributed traces
-open http://localhost:16686 # Jaeger UI
+open http://localhost:16686
 ```
 
-## API Endpoints
+---
 
-**Trip Management:**
+## Infrastructure
 
-- `POST /trip/preview` — Calculate route and fare estimates
-- `POST /trip/start` — Create a new trip
+### Development (`infra/development/`)
 
-**Real-time Communication:**
+Kubernetes manifests for local Minikube:
 
-- `WS /ws/riders` — Rider WebSocket connection
-- `WS /ws/drivers` — Driver WebSocket connection
+- Deployments + ClusterIP Services for all 4 microservices, RabbitMQ (with management plugin), MongoDB, and Jaeger
+- `secrets.yaml` — MongoDB URI, RabbitMQ URI, Stripe API keys, JWT secret
 
-**Webhooks:**
+### Production (`infra/production/`)
 
-- `POST /webhook/stripe` — Stripe payment webhooks
+GKE-ready configurations on top of the base manifests:
 
-## Key Engineering Practices
+- CPU/memory resource requests and limits on all pods
+- `HorizontalPodAutoscaler` for `api-gateway` and `trip-service`
+- `PodDisruptionBudget` for availability guarantees
+- `ConfigMap` for non-sensitive environment configuration
 
-1. **Distributed Tracing** \
-   Full request tracing across all services using OpenTelemetry and Jaeger for debugging and performance monitoring.
+All service images are built with multi-stage Dockerfiles (`golang:1.23-alpine` builder → `alpine` runtime) to minimize final image size.
 
-2. **Event-Driven Architecture** \
-   Asynchronous communication via RabbitMQ decouples services and improves resilience. The trip lifecycle is choreographed entirely through events.
-
-3. **Resilience Patterns** \
-   Per-request gRPC client pattern prevents cascading failures between services. Failed messages are retried up to 3 times before routing to a Dead Letter Queue.
-
-4. **Protocol Optimization**
-   - JSON for external APIs (developer-friendly)
-   - Protocol Buffers for internal gRPC communication (performance)
-5. **Infrastructure as Code** \
-   Complete Kubernetes manifests for both development and production environments, including health checks and resource limits.
-
-6. **Validated Reliability** \
-   A custom load testing framework validates the messaging infrastructure against a 99.9% reliability threshold, with latency percentile tracking and DLQ monitoring.
-
-## Production Deployment
-
-The project includes complete deployment configurations for Google Cloud Platform (GKE):
-
-- Multi-stage Docker builds for optimized images
-- Kubernetes manifests with health checks and resource limits
-- Secret management
+---
 
 ## Project Structure
 
 ```
 RideSync/
-├── services/                 # Microservices
-│   ├── api-gateway/          # HTTP/WebSocket edge service
-│   ├── trip-service/         # Trip lifecycle & matching logic
-│   ├── driver-service/       # Driver state & availability
-│   └── payment-service/      # Payment processing
+├── services/
+│   ├── api-gateway/          # HTTP/WebSocket edge — Gin, WebSocket hubs, event bridge
+│   ├── trip-service/         # Trip lifecycle — gRPC server, MongoDB, event publisher
+│   ├── driver-service/       # Driver state + matching — gRPC server, event consumer
+│   └── payment-service/      # Stripe payments — gRPC server, webhook handler
 │
-├── web/                      # Next.js frontend
+├── web/                      # Next.js 15 frontend (rider + driver dashboards, live map)
 │
-├── proto/                    # gRPC service definitions
+├── proto/                    # Protobuf definitions (trip.proto, driver.proto, payment.proto)
 │
-├── shared/                   # Shared libraries
-│   ├── db/                   # MongoDB connection
-│   ├── messaging/            # RabbitMQ client & utilities
-│   └── types/                # Common models & helpers
+├── shared/
+│   ├── messaging/            # RabbitMQ client, TripExchange setup, retry/DLQ policy
+│   ├── db/                   # MongoDB connection helper
+│   └── types/                # Shared domain types (Trip, Driver, Payment, TripStatus)
 │
-├── tests/
-│   ├── load/                 # Load testing framework
-│   │   ├── main.go           # CLI entrypoint (rate, duration, scenario flags)
-│   │   ├── scenarios/        # trip-creation, full-flow, broker-reliability
-│   │   ├── metrics/          # Thread-safe collector (latencies, DLQ, retries)
-│   │   └── reporter/         # Summary report generator (P50/P95/P99)
-│   └── config/
-│       └── test-profiles.yaml
+├── infra/
+│   ├── development/          # Minikube K8s manifests + secrets
+│   └── production/           # GKE manifests with HPA, PDB, resource limits
 │
-├── infra/                    # Infrastructure configs
-│   ├── development/          # Local Docker + Kubernetes manifests
-│   └── production/           # Production Kubernetes configs
-│
-├── Tiltfile                  # Local dev orchestration (live reload)
+├── Tiltfile                  # Local dev orchestration (build, deploy, port-forward)
 ├── go.mod
 └── README.md
 ```
@@ -353,10 +411,14 @@ RideSync/
 
 ## What This Project Demonstrates
 
-- **Microservices Architecture** — Service decomposition, API design, inter-service communication patterns
-- **Distributed Systems** — Event-driven choreography, distributed tracing, DLQ-backed resilience
-- **Performance Engineering** — Custom load testing tooling, latency percentile analysis, throughput validation
-- **Cloud-Native Development** — Containerization, Kubernetes orchestration, 12-factor app principles
-- **Backend Engineering** — Go, gRPC, Protocol Buffers, WebSocket, AMQP
-- **DevOps** — Docker, Kubernetes, Tilt live-reload, observability-first design
-- **Full-Stack Integration** — Next.js frontend with real-time WebSocket communication
+- **Distributed Systems Design** — Event-driven choreography, asynchronous decoupling, DLQ-backed resilience, retry policies
+- **Microservices Architecture** — Service decomposition, independent deployability, per-service data ownership
+- **gRPC & Protocol Buffers** — Strongly typed inter-service contracts with proto3, generated stubs
+- **Real-time Systems** — WebSocket hub management bridged to an AMQP event bus
+- **Clean / Hexagonal Architecture** — Domain isolation in trip-service and payment-service
+- **Cloud-Native Engineering** — Multi-stage Docker builds, Kubernetes orchestration, HPA, PDB
+- **Observability** — Distributed tracing across all services with OpenTelemetry and Jaeger
+- **Payment Integration** — Stripe PaymentIntent lifecycle with webhook validation
+- **Full-Stack Integration** — Go backend with a Next.js 15 / React 19 frontend communicating over REST and WebSocket
+
+![trace](https://rushikesh-bhavsar.vercel.app/api/ridesync-visit)
